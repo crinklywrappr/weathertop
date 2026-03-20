@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weathertop — Call Stack Heatmap</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #1a1a2e; color: #e0e0e0; font-family: monospace; }
+    #header {
+      padding: 10px 20px;
+      background: #16213e;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      border-bottom: 1px solid #0f3460;
+    }
+    #header h1 { font-size: 1.2rem; color: #e94560; }
+    #status { font-size: 0.8rem; color: #aaa; }
+    #total-calls { font-size: 0.85rem; color: #7ec8e3; }
+    #canvas-container {
+      width: 100vw;
+      height: calc(100vh - 48px);
+      overflow: hidden;
+    }
+    svg { width: 100%; height: 100%; }
+    .node rect {
+      rx: 4;
+      ry: 4;
+      stroke: #333;
+      stroke-width: 1;
+    }
+    .node text {
+      fill: #111;
+      font-size: 11px;
+      font-family: monospace;
+      pointer-events: none;
+    }
+    .link {
+      fill: none;
+      stroke: #555;
+      stroke-width: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>&#x26F0; Weathertop</h1>
+    <span id="status">connecting…</span>
+    <span id="total-calls"></span>
+  </div>
+  <div id="canvas-container">
+    <svg id="viz">
+      <g id="zoom-layer"></g>
+    </svg>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script>
+    const nodeW = 160;
+    const nodeH = 32;
+    const gapX  = 60;
+    const gapY  = 12;
+
+    const svg       = d3.select('#viz');
+    const zoomLayer = d3.select('#zoom-layer');
+    const statusEl  = document.getElementById('status');
+    const totalEl   = document.getElementById('total-calls');
+
+    // Set up zoom/pan
+    const zoom = d3.zoom()
+      .scaleExtent([0.1, 4])
+      .on('zoom', (event) => {
+        zoomLayer.attr('transform', event.transform);
+      });
+    svg.call(zoom);
+
+    // Color scale: log-normalized, RdYlBu reversed (hot=red, cool=blue)
+    const colorScale = d3.scaleSequential(d3.interpolateRdYlBu).domain([1, 0]);
+
+    function nodeColor(count, maxCount) {
+      if (maxCount === 0 || count === 0) return colorScale(0);
+      return colorScale(Math.log1p(count) / Math.log1p(maxCount));
+    }
+
+    function findMax(node) {
+      let m = node.data.call_count || 0;
+      for (const c of (node.children || [])) {
+        m = Math.max(m, findMax(c));
+      }
+      return m;
+    }
+
+    // Build a d3 tree layout for one top-level subtree
+    function layoutSubtree(rootData) {
+      const hierarchy = d3.hierarchy(rootData, d => d.children);
+      const treeLayout = d3.tree()
+        .nodeSize([nodeH + gapY, nodeW + gapX]);
+      return treeLayout(hierarchy);
+    }
+
+    let renderedRoots = [];
+
+    function render(data) {
+      totalEl.textContent = `total calls: ${data.total_calls}`;
+
+      const topChildren = (data.root && data.root.children) || [];
+      if (topChildren.length === 0) {
+        zoomLayer.selectAll('*').remove();
+        renderedRoots = [];
+        return;
+      }
+
+      // Layout each subtree independently
+      const subtrees = topChildren.map(child => layoutSubtree(child));
+
+      // Stack subtrees vertically; compute Y offsets
+      let yOffset = 40;
+      const offsets = subtrees.map(tree => {
+        const nodes = tree.descendants();
+        const minY  = d3.min(nodes, n => n.x);
+        const maxY  = d3.max(nodes, n => n.x);
+        const off   = yOffset - minY;
+        yOffset += (maxY - minY) + nodeH + 60;
+        return off;
+      });
+
+      // Gather all nodes and links across subtrees
+      const allNodes = subtrees.flatMap((tree, i) =>
+        tree.descendants().map(n => ({ node: n, yOff: offsets[i] }))
+      );
+      const allLinks = subtrees.flatMap((tree, i) =>
+        tree.links().map(l => ({ link: l, yOff: offsets[i] }))
+      );
+
+      const maxCount = d3.max(allNodes, ({ node }) => node.data.call_count) || 1;
+
+      const t = d3.transition().duration(400);
+
+      // Links
+      const linkSel = zoomLayer.selectAll('path.link')
+        .data(allLinks, ({ link }) => `${link.source.data.id}--${link.target.data.id}`);
+
+      linkSel.enter()
+        .append('path')
+        .attr('class', 'link')
+        .merge(linkSel)
+        .transition(t)
+        .attr('d', ({ link, yOff }) => {
+          const src = { x: link.source.y + yOff, y: link.source.x + yOff - link.source.x + link.source.x };
+          // use explicit coords
+          const sx = link.source.y;
+          const sy = link.source.x + yOff;
+          const tx = link.target.y;
+          const ty = link.target.x + yOff;
+          return `M${sx},${sy} C${(sx + tx) / 2},${sy} ${(sx + tx) / 2},${ty} ${tx},${ty}`;
+        });
+
+      linkSel.exit().remove();
+
+      // Nodes
+      const nodeSel = zoomLayer.selectAll('g.node')
+        .data(allNodes, ({ node }) => node.data.id);
+
+      const nodeEnter = nodeSel.enter()
+        .append('g')
+        .attr('class', 'node')
+        .attr('transform', ({ node, yOff }) => `translate(${node.y},${node.x + yOff})`);
+
+      nodeEnter.append('rect')
+        .attr('x', 0)
+        .attr('y', -nodeH / 2)
+        .attr('width', nodeW)
+        .attr('height', nodeH)
+        .attr('rx', 4)
+        .attr('ry', 4);
+
+      nodeEnter.append('title');
+
+      nodeEnter.append('text')
+        .attr('x', nodeW / 2)
+        .attr('y', 4)
+        .attr('text-anchor', 'middle');
+
+      const nodeMerge = nodeEnter.merge(nodeSel);
+
+      nodeMerge.transition(t)
+        .attr('transform', ({ node, yOff }) => `translate(${node.y},${node.x + yOff})`);
+
+      nodeMerge.select('rect')
+        .transition(t)
+        .attr('fill', ({ node }) => nodeColor(node.data.call_count, maxCount));
+
+      nodeMerge.select('title')
+        .text(({ node }) => `${node.data.id}\ncalls: ${node.data.call_count}`);
+
+      nodeMerge.select('text')
+        .text(({ node }) => {
+          const lbl = node.data.label || '';
+          return lbl.length > 18 ? lbl.slice(0, 17) + '…' : lbl;
+        });
+
+      nodeSel.exit().remove();
+    }
+
+    // SSE
+    const es = new EventSource('/events');
+    es.onopen    = () => { statusEl.textContent = 'live'; statusEl.style.color = '#4ade80'; };
+    es.onerror   = () => { statusEl.textContent = 'disconnected'; statusEl.style.color = '#f87171'; };
+    es.onmessage = (e) => { render(JSON.parse(e.data)); };
+
+    // Initial fetch
+    fetch('/data')
+      .then(r => r.json())
+      .then(render)
+      .catch(() => {});
+  </script>
+</body>
+</html>
