@@ -17,9 +17,9 @@
 (deftest test-offer-and-drain
   (testing "events are accumulated in call-state after draining"
     (store/start-drainer!)
-    (store/offer-event! ["myapp.core/handler"] 1)
-    (store/offer-event! ["myapp.core/handler"] 1)
-    (store/offer-event! ["myapp.core/handler" "myapp.db/query"] 2)
+    (store/offer-event! {:path ["myapp.core/handler"] :thread-id 1})
+    (store/offer-event! {:path ["myapp.core/handler"] :thread-id 1})
+    (store/offer-event! {:path ["myapp.core/handler" "myapp.db/query"] :thread-id 2})
     (Thread/sleep 200)                         ; let drainer process
     (let [state (store/get-state)]
       (is (= 2 (get state ["myapp.core/handler"])))
@@ -29,7 +29,7 @@
 (deftest test-reset-state
   (testing "reset-state! clears all counts"
     (store/start-drainer!)
-    (store/offer-event! ["ns/fn"] 1)
+    (store/offer-event! {:path ["ns/fn"] :thread-id 1})
     (Thread/sleep 150)
     (store/reset-state!)
     (is (= {} (store/get-state)))

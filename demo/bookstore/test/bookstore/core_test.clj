@@ -45,9 +45,11 @@
 ;; ── GET /books ───────────────────────────────────────────────────────────────
 
 (deftest list-all-books
-  (let [resp (call :get "/books")]
+  (let [resp  (call :get "/books")
+        books (parse-body resp)]
     (is (= 200 (:status resp)))
-    (is (= 10 (count (parse-body resp))))))
+    (is (= 10 (count books)))
+    (is (every? #(number? (:display_price %)) books))))
 
 (deftest list-books-filtered-by-tag
   (let [resp (call :get "/books" nil "tag=programming")]
@@ -70,7 +72,8 @@
       (is (= pragmatic-id (:id book)))
       (is (= "The Pragmatic Programmer" (:title book)))
       (is (= "David Thomas" (:author book)))
-      (is (number? (:price book))))))
+      (is (number? (:price book)))
+      (is (number? (:display_price book))))))
 
 (deftest get-missing-book
   (let [resp (call :get (str "/books/" unknown-id))]
@@ -168,6 +171,43 @@
   (let [resp (call :get (str "/books/" unknown-id "/similar"))]
     (is (= 404 (:status resp)))
     (is (contains? (parse-body resp) :error))))
+
+;; ── GET /books/search ────────────────────────────────────────────────────────
+
+(deftest search-by-title
+  (let [resp  (call :get "/books/search" nil "by=title&q=clean")
+        books (parse-body resp)]
+    (is (= 200 (:status resp)))
+    (is (seq books))
+    (is (every? #(clojure.string/includes?
+                   (clojure.string/lower-case (:title %)) "clean")
+                books))))
+
+(deftest search-by-author
+  (let [resp  (call :get "/books/search" nil "by=author&q=fowler")
+        books (parse-body resp)]
+    (is (= 200 (:status resp)))
+    (is (seq books))
+    (is (every? #(clojure.string/includes?
+                   (clojure.string/lower-case (:author %)) "fowler")
+                books))))
+
+(deftest search-by-price-range
+  (let [resp  (call :get "/books/search" nil "by=price-range&min=30&max=50")
+        books (parse-body resp)]
+    (is (= 200 (:status resp)))
+    (is (seq books))
+    (is (every? #(and (>= (:price %) 30.0) (<= (:price %) 50.0)) books))))
+
+(deftest search-unknown-strategy-returns-400
+  (let [resp (call :get "/books/search" nil "by=nonsense&q=foo")]
+    (is (= 400 (:status resp)))
+    (is (seq (:errors (parse-body resp))))))
+
+(deftest search-no-results
+  (let [resp (call :get "/books/search" nil "by=title&q=zzznomatch")]
+    (is (= 200 (:status resp)))
+    (is (empty? (parse-body resp)))))
 
 ;; ── unknown routes ───────────────────────────────────────────────────────────
 

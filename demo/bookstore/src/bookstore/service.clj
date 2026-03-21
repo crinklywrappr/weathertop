@@ -1,19 +1,25 @@
 (ns bookstore.service
   (:require [bookstore.db :as db]
             [bookstore.format :as fmt]
+            [bookstore.pricing :as pricing]
+            [bookstore.search :as search]
             [bookstore.validate :as validate])
   (:import [java.util UUID]))
 
+(defn- enrich-book [book]
+  (assoc book :display_price
+         (pricing/display-price (pricing/pricer-for book) (:price book))))
+
 (defn list-books [filters]
-  (let [all    (db/all-books)
-        books  (if-let [tag (:tag filters)]
-                 (filter #(some #{tag} (:tags %)) all)
-                 all)]
-    (fmt/ok (fmt/books->wire books))))
+  (let [all   (db/all-books)
+        books (if-let [tag (:tag filters)]
+                (filter #(some #{tag} (:tags %)) all)
+                all)]
+    (fmt/ok (fmt/books->wire (map enrich-book books)))))
 
 (defn find-book [id]
   (if-let [book (db/find-book id)]
-    (fmt/ok (fmt/book->wire book))
+    (fmt/ok (fmt/book->wire (enrich-book book)))
     (fmt/not-found (str "Book not found: " id))))
 
 (defn create-book! [params]
@@ -59,3 +65,9 @@
           ranked      (rank-by-overlap with-scores)]
       (fmt/ok (fmt/books->wire ranked)))
     (fmt/not-found (str "Book not found: " id))))
+
+(defn search-books [query]
+  (try
+    (fmt/ok (fmt/books->wire (map enrich-book (search/search-books query))))
+    (catch clojure.lang.ExceptionInfo e
+      (fmt/bad-request [(ex-message e)]))))

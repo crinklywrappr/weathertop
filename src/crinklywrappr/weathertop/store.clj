@@ -15,9 +15,11 @@
 ;; --- Public API ---
 
 (defn offer-event!
-  "Enqueue a call event. Non-blocking; drops if queue is full."
-  [call-path thread-id]
-  (.offer event-queue {:path call-path :thread-id thread-id}))
+  "Enqueue a call event. Non-blocking; drops if queue is full.
+   event-map keys: :path (required), :thread-id (required),
+                   :dispatch-val (multimethods), :type (protocol fns)."
+  [event-map]
+  (.offer event-queue event-map))
 
 (defn get-state
   "Return a snapshot of the current call-state map."

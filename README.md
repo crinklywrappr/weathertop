@@ -90,7 +90,6 @@ Both `myapp.*` and `mylib.*` namespaces will appear in the heatmap.
 - **`*call-stack*` is thread-local.** Calls made inside `future`, `pmap`, or
   any other threadpool start a fresh top-level entry in the heatmap.
   `core.async` go blocks lose call-stack context at park points.
-- **Protocol methods are not instrumented** in v0.1.
 - **Namespaces loaded after `start!`** are not instrumented.  Call `start!`
   again (or `stop!` / `start!`) to pick them up.
 - **Call depth is capped at 20** to prevent runaway recursion from filling

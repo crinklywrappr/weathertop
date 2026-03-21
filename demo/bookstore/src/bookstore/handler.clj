@@ -11,6 +11,11 @@
       (json/read-value (slurp body) json/keyword-keys-object-mapper)
       (catch Exception _ nil))))
 
+(defn- parse-query-double [s]
+  (when (seq s)
+    (try (Double/parseDouble s)
+         (catch NumberFormatException _ nil))))
+
 (defn handle-list [req]
   (let [params (:query-params req)
         tag    (get params "tag")]
@@ -32,9 +37,18 @@
 (defn handle-similar [id]
   (service/similar-books id))
 
+(defn handle-search [req]
+  (let [params (:query-params req)
+        query  {:by  (keyword (get params "by"))
+                :q   (get params "q")
+                :min (parse-query-double (get params "min"))
+                :max (parse-query-double (get params "max"))}]
+    (service/search-books query)))
+
 (defroutes app-routes
   (GET    "/books"              req  (handle-list req))
   (POST   "/books"              req  (handle-create req))
+  (GET    "/books/search"       req  (handle-search req))
   (GET    "/books/:id/similar"  [id] (handle-similar id))
   (GET    "/books/:id"          [id] (handle-get id))
   (PUT    "/books/:id"          req  (handle-update req))

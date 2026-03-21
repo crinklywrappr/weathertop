@@ -7,7 +7,7 @@
    :body    (json/write-value-as-string body)})
 
 (defn book->wire [book]
-  (select-keys book [:id :title :author :tags :price]))
+  (select-keys book [:id :title :author :tags :price :display_price]))
 
 (defn books->wire [books]
   (mapv book->wire books))

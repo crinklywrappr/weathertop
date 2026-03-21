@@ -72,6 +72,33 @@ create_book() {
   fi
 }
 
+search_books() {
+  local strategies=("title" "author" "price-range")
+  local by
+  by=$(shuf -n1 -e "${strategies[@]}")
+
+  case "$by" in
+    title)
+      local terms=("Code" "Design" "Programming" "Pragmatic" "Clean" "Structure" "Algorithms")
+      local q
+      q=$(shuf -n1 -e "${terms[@]}")
+      request GET "/books/search?by=title&q=$q"
+      ;;
+    author)
+      local authors=("Martin" "Fowler" "Thomas" "Brooks" "Evans" "Feathers")
+      local q
+      q=$(shuf -n1 -e "${authors[@]}")
+      request GET "/books/search?by=author&q=$q"
+      ;;
+    price-range)
+      local min max
+      min=$(awk "BEGIN {printf \"%.2f\", 10 + $RANDOM % 40}")
+      max=$(awk "BEGIN {printf \"%.2f\", $min + 10 + $RANDOM % 50}")
+      request GET "/books/search?by=price-range&min=$min&max=$max"
+      ;;
+  esac
+}
+
 update_book() {
   local id="$1"
   local price
@@ -124,8 +151,10 @@ while true; do
 
   if [[ -z "$id" ]]; then
     list_books
-  elif [[ $roll -lt 50 ]]; then
+  elif [[ $roll -lt 40 ]]; then
     get_book "$id"
+  elif [[ $roll -lt 50 ]]; then
+    search_books
   elif [[ $roll -lt 70 ]]; then
     similar "$id"
   elif [[ $roll -lt 85 ]]; then
