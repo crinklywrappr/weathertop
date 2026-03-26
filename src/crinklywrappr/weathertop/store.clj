@@ -89,9 +89,10 @@
           (keys state)))
 
 (defn- elem-fn  [e] (if (string? e) e (:fn e)))
-(defn- elem-dv  [e] (when (map? e) (or (:dispatch-val e) (:record-type e))))
+(defn- elem-dv  [e] (when (map? e) (:dispatch-val e)))
+(defn- elem-rt  [e] (when (map? e) (:record-type e)))
 (defn- elem->id [e]
-  (if-let [dv (elem-dv e)]
+  (if-let [dv (or (elem-dv e) (elem-rt e))]
     (str (elem-fn e) "[" dv "]")
     (elem-fn e)))
 
@@ -112,7 +113,6 @@
                    (map (fn [p]
                           (let [elem    (last p)
                                 fq      (elem-fn elem)
-                                dv      (elem-dv elem)
                                 cnt     (get state p 0)
                                 id      (clojure.string/join "::" (map elem->id p))
                                 parts   (clojure.string/split fq #"/")
@@ -124,8 +124,9 @@
                                      :fn_name    fn-name
                                      :call_count cnt
                                      :children   (build-children p)}
-                              ns-part (assoc :namespace ns-part)
-                              dv      (assoc :dispatch_val (str dv))))))
+                              ns-part        (assoc :namespace    ns-part)
+                              (elem-dv elem) (assoc :dispatch_val (str (elem-dv elem)))
+                              (elem-rt elem) (assoc :record_type  (str (elem-rt elem)))))))
                    (sort-by :call_count >)))]
       {:schema_version 1
        :total_calls    total

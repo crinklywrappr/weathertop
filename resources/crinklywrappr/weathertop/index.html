@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Weathertop — Call Stack Heatmap</title>
+  <title>Weathertop — Call Path Tree</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #1a1a2e; color: #e0e0e0; font-family: monospace; }
@@ -92,20 +92,19 @@
     const colorScale = d3.scaleSequential(d3.interpolateRdYlBu).domain([1, 0]);
 
     function stripeColor(d) {
-      if (d.node.data.type)         return '#0f766e';  // dark teal — protocol
+      if (d.node.data.record_type)  return '#0f766e';  // dark teal — protocol
       if (d.node.data.dispatch_val) return '#92400e';  // dark amber — multimethod variant
-      if (d.node.data.multimethod)  return '#92400e';  // dark amber — multimethod base
       return 'none';
     }
 
     function variantColor(d) {
-      if (d.node.data.type)         return '#0f766e';  // dark teal — protocol
+      if (d.node.data.record_type)  return '#0f766e';  // dark teal — protocol
       if (d.node.data.dispatch_val) return '#92400e';  // dark amber — multimethod
       return 'none';
     }
 
     function variantText(d) {
-      if (d.node.data.type)         return d.node.data.type;
+      if (d.node.data.record_type)  return d.node.data.record_type;
       if (d.node.data.dispatch_val) return d.node.data.dispatch_val;
       return '';
     }
@@ -252,7 +251,7 @@
       nodeMerge.select('title')
         .text(({ node }) => {
           let tip = `${node.data.label}\ncalls: ${node.data.call_count}`;
-          if (node.data.type)         tip += `\ntype: ${node.data.type}`;
+          if (node.data.record_type)  tip += `\ntype: ${node.data.record_type}`;
           if (node.data.dispatch_val) tip += `\ndispatch: ${node.data.dispatch_val}`;
           return tip;
         });
