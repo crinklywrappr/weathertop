@@ -102,14 +102,12 @@
   [state]
   (let [state     (ensure-parents state)
         all-paths (sort-by count (keys state))
-        total     (reduce + 0 (vals state))
-        max-depth 20]
+        total     (reduce + 0 (vals state))]
     (letfn [(build-children [prefix]
               (->> all-paths
                    (filter (fn [p]
                              (and (= (count p) (inc (count prefix)))
-                                  (= (take (count prefix) p) prefix)
-                                  (<= (count p) max-depth))))
+                                  (= (take (count prefix) p) prefix))))
                    (map (fn [p]
                           (let [elem    (last p)
                                 fq      (elem-fn elem)
