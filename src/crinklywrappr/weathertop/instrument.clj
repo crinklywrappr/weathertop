@@ -53,7 +53,7 @@
             tid   (.getId (Thread/currentThread))]
         (when-not (:multimethod-dispatch-fn? (last stack))
           (let [path (expand-multimethods (mapv frame->path-elem stack))]
-            (when (and (seq path) (< (count path) 20))
+            (when (seq path)
               (let [last-elem (last path)]
                 ;; For multimethod variants: expand-multimethods has already made the
                 ;; path 3+ elements, so butlast points to the intermediate node (not
