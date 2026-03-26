@@ -23,8 +23,9 @@
                     (filter (fn [ns-sym]
                               (let [n (name ns-sym)]
                                 (some #(clojure.string/starts-with? n %) ns-prefixes)))))]
-      (when (seq (instrument/instrumented-namespaces))
-        (instrument/uninstrument-all!))
+      (instrument/uninstrument-all!)
+      (store/stop-drainer!)
+      (server/stop-server!)
       (stacklens/prime-cache! stacklens-opts)
       (store/start-drainer!)
       (doseq [ns-sym nses]
