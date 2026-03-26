@@ -30,10 +30,23 @@
       stroke: #333;
       stroke-width: 1;
     }
-    .node text {
+    .node rect.stripe { stroke: none; stroke-width: 0; }
+    .node .variant-label {
+      font-size: 9px;
+      font-family: monospace;
+      pointer-events: none;
+    }
+    .node .ns-label {
+      fill: #333;
+      font-size: 9px;
+      font-family: monospace;
+      pointer-events: none;
+    }
+    .node .fn-label {
       fill: #111;
       font-size: 11px;
       font-family: monospace;
+      font-weight: bold;
       pointer-events: none;
     }
     .link {
@@ -57,8 +70,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
   <script>
-    const nodeW = 160;
-    const nodeH = 32;
+    const nodeW = 180;
+    const nodeH = 44;
     const gapX  = 60;
     const gapY  = 12;
 
@@ -77,6 +90,31 @@
 
     // Color scale: log-normalized, RdYlBu reversed (hot=red, cool=blue)
     const colorScale = d3.scaleSequential(d3.interpolateRdYlBu).domain([1, 0]);
+
+    function stripeColor(d) {
+      if (d.node.data.type)         return '#0f766e';  // dark teal — protocol
+      if (d.node.data.dispatch_val) return '#92400e';  // dark amber — multimethod variant
+      if (d.node.data.multimethod)  return '#92400e';  // dark amber — multimethod base
+      return 'none';
+    }
+
+    function variantColor(d) {
+      if (d.node.data.type)         return '#0f766e';  // dark teal — protocol
+      if (d.node.data.dispatch_val) return '#92400e';  // dark amber — multimethod
+      return 'none';
+    }
+
+    function variantText(d) {
+      if (d.node.data.type)         return d.node.data.type;
+      if (d.node.data.dispatch_val) return d.node.data.dispatch_val;
+      return '';
+    }
+
+    function abbrevNs(ns) {
+      if (!ns || ns.length <= 24) return ns || '';
+      const parts = ns.split('.');
+      return parts.slice(0, -1).map(p => p[0]).join('.') + '.' + parts[parts.length - 1];
+    }
 
     function nodeColor(count, maxCount) {
       if (maxCount === 0 || count === 0) return colorScale(0);
@@ -175,30 +213,66 @@
         .attr('rx', 4)
         .attr('ry', 4);
 
+      nodeEnter.append('rect')
+        .attr('class', 'stripe')
+        .attr('x', 0).attr('y', -nodeH / 2)
+        .attr('width', 4).attr('height', nodeH)
+        .attr('rx', 2)
+        .attr('fill', 'none');
+
       nodeEnter.append('title');
 
       nodeEnter.append('text')
-        .attr('x', nodeW / 2)
-        .attr('y', 4)
-        .attr('text-anchor', 'middle');
+        .attr('class', 'ns-label')
+        .attr('x', 10)
+        .attr('text-anchor', 'start');
+
+      nodeEnter.append('text')
+        .attr('class', 'fn-label')
+        .attr('x', 10)
+        .attr('text-anchor', 'start');
+
+      nodeEnter.append('text')
+        .attr('class', 'variant-label')
+        .attr('x', 10).attr('y', 16)
+        .attr('text-anchor', 'start');
 
       const nodeMerge = nodeEnter.merge(nodeSel);
 
       nodeMerge.transition(t)
         .attr('transform', ({ node, yOff }) => `translate(${node.y},${node.x + yOff})`);
 
-      nodeMerge.select('rect')
+      nodeMerge.select('rect:not(.stripe)')
         .transition(t)
         .attr('fill', ({ node }) => nodeColor(node.data.call_count, maxCount));
 
-      nodeMerge.select('title')
-        .text(({ node }) => `${node.data.id}\ncalls: ${node.data.call_count}`);
+      nodeMerge.select('rect.stripe')
+        .attr('fill', d => stripeColor(d));
 
-      nodeMerge.select('text')
+      nodeMerge.select('title')
         .text(({ node }) => {
-          const lbl = node.data.label || '';
-          return lbl.length > 18 ? lbl.slice(0, 17) + '…' : lbl;
+          let tip = `${node.data.label}\ncalls: ${node.data.call_count}`;
+          if (node.data.type)         tip += `\ntype: ${node.data.type}`;
+          if (node.data.dispatch_val) tip += `\ndispatch: ${node.data.dispatch_val}`;
+          return tip;
         });
+
+      const hasVariant = d => d.node.data.type || d.node.data.dispatch_val;
+
+      nodeMerge.select('text.ns-label')
+        .attr('y', d => hasVariant(d) ? -12 : -8)
+        .text(({ node }) => abbrevNs(node.data.namespace));
+
+      nodeMerge.select('text.fn-label')
+        .attr('y', d => hasVariant(d) ? 2 : 8)
+        .text(({ node }) => {
+          const fn = node.data.fn_name || '';
+          return fn.length > 22 ? fn.slice(0, 21) + '…' : fn;
+        });
+
+      nodeMerge.select('text.variant-label')
+        .attr('fill', d => variantColor(d))
+        .text(d => variantText(d));
 
       nodeSel.exit().remove();
     }

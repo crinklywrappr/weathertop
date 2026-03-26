@@ -4,17 +4,22 @@
   (display-price [this base-price]
     "Return the display price for base-price given this pricing strategy."))
 
+;; Case 1 (stacklens IRecord path): inline defrecord protocol impl
 (defrecord FullPrice []
   Pricer
   (display-price [_this base-price] base-price))
 
-(defrecord PercentOff [pct]
+;; Case 2 (stacklens extend-type path)
+(defrecord PercentOff [pct])
+(extend-type PercentOff
   Pricer
   (display-price [this base-price]
     (- base-price (* base-price (/ (:pct this) 100.0)))))
 
-(defrecord FixedOff [amount]
-  Pricer
+;; Case 2 (stacklens extend-protocol path)
+(defrecord FixedOff [amount])
+(extend-protocol Pricer
+  FixedOff
   (display-price [this base-price]
     (max 0.0 (- base-price (:amount this)))))
 

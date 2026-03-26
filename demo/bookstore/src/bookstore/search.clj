@@ -1,10 +1,14 @@
 (ns bookstore.search
   (:require [bookstore.db :as db]))
 
+(defn by-query [query]
+  (:by query))
+
+;; written this way to test correct rendering of multimethods
 (defmulti search-books
   "Search books by the strategy named in (:by query).
    Dispatch values: :title, :author, :price-range."
-  (fn [query] (:by query)))
+  (fn [query] (by-query query)))
 
 (defmethod search-books :title [{:keys [q]}]
   (let [q-lower (clojure.string/lower-case (or q ""))]

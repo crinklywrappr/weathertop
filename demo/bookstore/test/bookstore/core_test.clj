@@ -40,6 +40,7 @@
 
 (def ^:private pragmatic-id   "a1b2c3d4-0001-0000-0000-000000000001")
 (def ^:private clean-code-id  "a1b2c3d4-0002-0000-0000-000000000002")
+(def ^:private philosophy-id  "a1b2c3d4-000a-0000-0000-00000000000a")
 (def ^:private unknown-id     "00000000-0000-0000-0000-000000000000")
 
 ;; ── GET /books ───────────────────────────────────────────────────────────────
@@ -208,6 +209,15 @@
   (let [resp (call :get "/books/search" nil "by=title&q=zzznomatch")]
     (is (= 200 (:status resp)))
     (is (empty? (parse-body resp)))))
+
+;; ── pricing strategy coverage ────────────────────────────────────────────────
+
+(deftest sale-book-gets-percent-off
+  (testing "a book with the sale tag gets a discounted display_price"
+    (let [resp (call :get (str "/books/" philosophy-id))
+          book (parse-body resp)]
+      (is (= 200 (:status resp)))
+      (is (< (:display_price book) (:price book))))))
 
 ;; ── unknown routes ───────────────────────────────────────────────────────────
 

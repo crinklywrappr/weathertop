@@ -69,7 +69,7 @@
     {:id "a1b2c3d4-000a-0000-0000-00000000000a"
      :title "A Philosophy of Software Design"
      :author "John Ousterhout"
-     :tags ["design" "software" "career"]
+     :tags ["design" "software" "career" "sale"]
      :price 29.99}}))
 
 (defn all-books []

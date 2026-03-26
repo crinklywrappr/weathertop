@@ -1,7 +1,8 @@
 (ns crinklywrappr.weathertop.core
   (:require [crinklywrappr.weathertop.instrument :as instrument]
             [crinklywrappr.weathertop.server :as server]
-            [crinklywrappr.weathertop.store :as store]))
+            [crinklywrappr.weathertop.store :as store]
+            [crinklywrappr.stacklens.core :as stacklens]))
 
 (defn start!
   "Instruments namespaces and starts the web server.
@@ -16,16 +17,18 @@
     (when (empty? ns-prefixes)
       (throw (ex-info ":ns-prefixes is required and must be a non-empty vector of strings"
                       {:opts opts})))
-    (let [nses (->> (all-ns)
+    (let [stacklens-opts {:include (mapv #(clojure.string/replace % "-" "_") ns-prefixes)}
+          nses (->> (all-ns)
                     (map ns-name)
                     (filter (fn [ns-sym]
                               (let [n (name ns-sym)]
                                 (some #(clojure.string/starts-with? n %) ns-prefixes)))))]
       (when (seq (instrument/instrumented-namespaces))
         (instrument/uninstrument-all!))
+      (stacklens/prime-cache! stacklens-opts)
       (store/start-drainer!)
       (doseq [ns-sym nses]
-        (instrument/instrument-ns! ns-sym))
+        (instrument/instrument-ns! ns-sym stacklens-opts))
       (server/start-server! port)
       (println (str "Weathertop started on http://localhost:" port
                     " — instrumenting: " (vec (instrument/instrumented-namespaces)))))))

@@ -88,39 +88,48 @@
           state
           (keys state)))
 
+(defn- elem-fn  [e] (if (string? e) e (:fn e)))
+(defn- elem-dv  [e] (when (map? e) (or (:dispatch-val e) (:record-type e))))
+(defn- elem->id [e]
+  (if-let [dv (elem-dv e)]
+    (str (elem-fn e) "[" dv "]")
+    (elem-fn e)))
+
 (defn call-paths->tree
-  "Convert the flat {path → count} map into the nested tree JSON structure."
+  "Convert the flat {path → count} map into the nested tree JSON structure.
+   Path elements are plain strings or maps {:fn \"ns/fn\" :dispatch-val kw}."
   [state]
   (let [state     (ensure-parents state)
         all-paths (sort-by count (keys state))
         total     (reduce + 0 (vals state))
-        max-depth 20
-
-        build-children
-        (fn build-children [prefix]
-          (let [children (->> all-paths
-                              (filter (fn [p]
-                                        (and (= (count p) (inc (count prefix)))
-                                             (= (take (count prefix) p) prefix)
-                                             (<= (count p) max-depth))))
-                              (map (fn [p]
-                                     (let [cnt  (get state p 0)
-                                           id   (clojure.string/join "::" p)
-                                           label (last p)
-                                           ns-part (let [parts (clojure.string/split label #"/")]
-                                                     (when (> (count parts) 1)
-                                                       (clojure.string/join "." (butlast parts))))]
-                                       (cond-> {:id         id
-                                                :label      label
-                                                :call_count cnt
-                                                :children   (build-children p)}
-                                         ns-part (assoc :namespace ns-part)))))
-                              (sort-by :call_count >))]
-            children))]
-
-    {:schema_version 1
-     :total_calls    total
-     :root           {:id         "__root__"
-                      :label      nil
-                      :call_count 0
-                      :children   (build-children [])}}))
+        max-depth 20]
+    (letfn [(build-children [prefix]
+              (->> all-paths
+                   (filter (fn [p]
+                             (and (= (count p) (inc (count prefix)))
+                                  (= (take (count prefix) p) prefix)
+                                  (<= (count p) max-depth))))
+                   (map (fn [p]
+                          (let [elem    (last p)
+                                fq      (elem-fn elem)
+                                dv      (elem-dv elem)
+                                cnt     (get state p 0)
+                                id      (clojure.string/join "::" (map elem->id p))
+                                parts   (clojure.string/split fq #"/")
+                                fn-name (last parts)
+                                ns-part (when (> (count parts) 1)
+                                          (clojure.string/join "." (butlast parts)))]
+                            (cond-> {:id         id
+                                     :label      fq
+                                     :fn_name    fn-name
+                                     :call_count cnt
+                                     :children   (build-children p)}
+                              ns-part (assoc :namespace ns-part)
+                              dv      (assoc :dispatch_val (str dv))))))
+                   (sort-by :call_count >)))]
+      {:schema_version 1
+       :total_calls    total
+       :root           {:id         "__root__"
+                        :label      nil
+                        :call_count 0
+                        :children   (build-children [])}})))

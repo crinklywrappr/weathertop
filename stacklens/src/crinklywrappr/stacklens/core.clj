@@ -19,6 +19,19 @@
 (def ^:private method-cache (atom nil))
 (def ^:private method-miss  (atom #{}))
 
+(def original-multifn-key
+  "Metadata key under which a wrapper fn may store the original MultiFn it
+   replaced. When present, build-method-cache uses the stored MultiFn to
+   index defmethod bodies rather than the wrapper."
+  ::original-multifn)
+
+(def original-method-class-key
+  "Metadata key under which a method wrapper fn may store the original method
+   body's class name. When present, build-method-cache uses it as the cache key
+   instead of the wrapper's own class name, so cache rebuilds after instrumentation
+   still map original-body class names to dispatch values."
+  ::original-method-class)
+
 (def ^:private dispatch-fn-field
   (doto (.getDeclaredField clojure.lang.MultiFn "dispatchFn")
     (.setAccessible true)))
@@ -43,15 +56,20 @@
     (->> (concat
           (->> all-vars
                (filter (fn [v]
-                         (try (instance? clojure.lang.MultiFn @v)
+                         (try (let [x @v]
+                                (or (instance? clojure.lang.MultiFn x)
+                                    (instance? clojure.lang.MultiFn
+                                               (original-multifn-key (meta x)))))
                               (catch Exception _ false))))
                (mapcat (fn [v]
                          (let [m      (meta v)
                                fq     (str (ns-name (:ns m)) "/" (:name m))
-                               multi  @v
+                               x      @v
+                               multi  (or (original-multifn-key (meta x)) x)
                                method-entries
                                (map (fn [[dv f]]
-                                      [(.getName (class f))
+                                      [(or (original-method-class-key (meta f))
+                                           (.getName (class f)))
                                        {:fq-sym fq :dispatch-val dv}])
                                     (methods multi))
                                dispatch-cname (.getName (class (.get dispatch-fn-field multi)))]
@@ -71,14 +89,28 @@
                                proto    @v]
                            (mapcat
                             (fn [[type-class method-map]]
-                              (keep
-                               (fn [[method-key impl-fn]]
-                                 (let [cname (.getName (class impl-fn))]
-                                   (when (.contains cname "$")
-                                     [cname {:fq-sym     (str proto-ns "/" (name method-key))
-                                             :record-type (.getSimpleName type-class)}])))
-                               method-map))
-                            (:impls proto)))))))
+                              (when type-class
+                                (keep
+                                 (fn [[method-key impl-fn]]
+                                   (when impl-fn
+                                     (let [cname (or (original-method-class-key (meta impl-fn))
+                                                     (.getName (class impl-fn)))]
+                                       (when (.contains cname "$")
+                                         [cname {:fq-sym     (str proto-ns "/" (name method-key))
+                                                 :record-type (.getSimpleName type-class)}]))))
+                                 method-map)))
+                            (:impls proto))))))
+          (->> all-vars
+               (filter (fn [v]
+                         (let [vname (str (:name (meta v)))]
+                           (and (or (.startsWith vname "->")
+                                    (.startsWith vname "map->"))
+                                (try (not (instance? clojure.lang.MultiFn @v))
+                                     (catch Exception _ false))))))
+               (map (fn [v]
+                      (let [m      (meta v)
+                            fq-sym (str (ns-name (:ns m)) "/" (:name m))]
+                        [(.getName (class @v)) {:fq-sym fq-sym}])))))
          (into {}))))
 
 (defn- lookup-defmethod [class-name opts]
@@ -122,7 +154,7 @@
   #{"hashCode" "equals" "toString" "meta" "withMeta"
     "valAt" "assoc" "assocEx" "without" "containsKey" "entryAt"
     "count" "cons" "empty" "equiv" "seq" "iterator"
-    "getBasis" "getField"})
+    "getBasis" "getField" "getLookupThunk"})
 
 (defn- classify [^StackWalker$StackFrame frame opts]
   (let [^Class cls (.getDeclaringClass frame)
@@ -151,12 +183,12 @@
           dispatch-fn? (map->StackFrame {:cname cls :fn fq-sym :multimethod-dispatch-fn? true})
           record-type  (map->StackFrame {:cname cls :fn fq-sym :record-type record-type})
           :else        (map->StackFrame {:cname cls :fn fq-sym :multimethod-dispatch-val dispatch-val}))
-        ;; Case 3: regular Clojure fn.
-        ;; Take only the first two "$"-separated parts (ns + fn name) to collapse
-        ;; nested anonymous fns back to their enclosing named fn.
-        (let [parts (sg/split cname #"\$")
-              base  (sg/join "$" (take 2 parts))]
-          (map->StackFrame {:cname cls :fn (Compiler/demunge base)}))))))
+        ;; Case 3: named top-level Clojure fn (exactly one "$": ns$fn_name).
+        ;; Multi-segment classes not in the method cache are runtime artifacts
+        ;; (protocol dispatch wrappers, eval frames) — return nil to exclude them.
+        (let [parts (sg/split cname #"\$")]
+          (when (= 2 (count parts))
+            (map->StackFrame {:cname cls :fn (Compiler/demunge cname)})))))))
 
 ;; --- Public API ---
 
@@ -193,3 +225,11 @@
         [(list) nil]
         (.collect (.filter stream (make-pred opts))
                   (Collectors/toList)))))))
+
+(defn prime-cache!
+  "Eagerly build the method cache with opts. Call this before instrumenting
+   namespaces so defmethod bodies and dispatch fns are indexed while vars still
+   hold their original MultiFn values."
+  [opts]
+  (reset! method-cache (build-method-cache opts))
+  (reset! method-miss #{}))

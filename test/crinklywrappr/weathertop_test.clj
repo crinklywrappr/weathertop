@@ -12,6 +12,34 @@
 
 (use-fixtures :each reset-store-fixture)
 
+;; --- Protocol test fixtures ---
+
+(defprotocol TestPricer
+  (test-price [this amount]))
+
+;; Case 1: inline defrecord — the key new case (was invisible with alter-var-root)
+(defrecord InlineTestPrice []
+  TestPricer
+  (test-price [_ amount] amount))
+
+;; Case 2: extend-type
+(defrecord ExtendTestPrice [])
+(extend-type ExtendTestPrice
+  TestPricer
+  (test-price [_ amount] amount))
+
+(defn test-caller [pricer x]
+  (test-price pricer x))
+
+;; --- Multimethod test fixtures ---
+
+(defmulti  test-pricer-multi (fn [x _] (:kind x)))
+(defmethod test-pricer-multi :flat [_ amount] amount)
+(defmethod test-pricer-multi :half [_ amount] (/ amount 2.0))
+
+(defn multi-caller [kind amount]
+  (test-pricer-multi {:kind kind} amount))
+
 ;; --- Store tests ---
 
 (deftest test-offer-and-drain
@@ -20,7 +48,7 @@
     (store/offer-event! {:path ["myapp.core/handler"] :thread-id 1})
     (store/offer-event! {:path ["myapp.core/handler"] :thread-id 1})
     (store/offer-event! {:path ["myapp.core/handler" "myapp.db/query"] :thread-id 2})
-    (Thread/sleep 200)                         ; let drainer process
+    (Thread/sleep 200)
     (let [state (store/get-state)]
       (is (= 2 (get state ["myapp.core/handler"])))
       (is (= 1 (get state ["myapp.core/handler" "myapp.db/query"]))))
@@ -56,8 +84,8 @@
 
 (deftest test-call-paths->tree-nested
   (testing "nested paths produce correct parent/child structure"
-    (let [state {["ns/a"]       3
-                 ["ns/a" "ns/b"] 2}
+    (let [state {["ns/a"]          3
+                 ["ns/a" "ns/b"]   2}
           tree  (store/call-paths->tree state)
           root-children (get-in tree [:root :children])
           parent (first root-children)
@@ -87,49 +115,95 @@
 
 ;; --- Instrumentation tests ---
 
+(def ^:private test-opts {:include ["crinklywrappr.weathertop_test"]})
+
 (deftest test-instrument-and-uninstrument
-  (testing "instrument-ns! wraps public fns; uninstrument-all! restores them"
-    (let [orig clojure.string/upper-case]
-      (instrument/instrument-ns! 'clojure.string)
-      (is (contains? (instrument/instrumented-namespaces) 'clojure.string))
-      ;; Instrumented fn still works
-      (is (= "HELLO" (clojure.string/upper-case "hello")))
-      (instrument/uninstrument-all!)
-      (is (empty? (instrument/instrumented-namespaces)))
-      ;; Var restored to original
-      (is (= orig clojure.string/upper-case)))))
+  (testing "instrument-ns! adds ns; uninstrument-all! clears it"
+    (instrument/instrument-ns! 'crinklywrappr.weathertop-test test-opts)
+    (is (contains? (instrument/instrumented-namespaces) 'crinklywrappr.weathertop-test))
+    ;; Instrumented fn still works correctly
+    (is (= 42 (test-caller (->InlineTestPrice) 42)))
+    (instrument/uninstrument-all!)
+    (is (empty? (instrument/instrumented-namespaces)))))
 
 (deftest test-call-recorded
   (testing "calling an instrumented fn records an event in the store"
     (store/start-drainer!)
-    (instrument/instrument-ns! 'clojure.string)
-    (clojure.string/split "a,b,c" #",")
+    (instrument/instrument-ns! 'crinklywrappr.weathertop-test test-opts)
+    (test-caller (->InlineTestPrice) 42)
     (Thread/sleep 200)
     (let [state (store/get-state)
           paths (keys state)]
-      (is (some #(= "clojure.string/split" (last %)) paths)))
+      (is (some #(= "crinklywrappr.weathertop-test/test-caller" (:fn (last %))) paths)
+          "test-caller should be recorded"))
     (instrument/uninstrument-all!)
     (store/stop-drainer!)))
 
 (deftest test-no-double-wrap
-  (testing "instrumenting the same ns twice does not double-wrap"
-    (instrument/instrument-ns! 'clojure.string)
-    (let [wrapped clojure.string/upper-case]
-      (instrument/instrument-ns! 'clojure.string)   ; second call
-      ;; Still the same wrapper object (no re-wrap)
-      (is (= wrapped clojure.string/upper-case)))
-    (instrument/uninstrument-all!)))
-
-(deftest test-call-stack-threading
-  (testing "*call-stack* propagates depth within a single thread"
+  (testing "instrumenting the same ns twice does not double-count events"
     (store/start-drainer!)
-    (instrument/instrument-ns! 'clojure.string)
-    ;; Manually binding to simulate an outer context
-    (binding [instrument/*call-stack* ["outer/fn"]]
-      (clojure.string/upper-case "x"))
+    (instrument/instrument-ns! 'crinklywrappr.weathertop-test test-opts)
+    (instrument/instrument-ns! 'crinklywrappr.weathertop-test test-opts)
+    (test-caller (->InlineTestPrice) 1)
+    (Thread/sleep 200)
+    (let [state        (store/get-state)
+          caller-paths (filter #(= "crinklywrappr.weathertop-test/test-caller"
+                                   (:fn (last %))) (keys state))]
+      (is (= 1 (reduce + (map state caller-paths)))
+          "test-caller should be counted exactly once"))
+    (instrument/uninstrument-all!)
+    (store/stop-drainer!)))
+
+(deftest test-inline-defrecord-recorded
+  (testing "inline defrecord protocol method is recorded (IRecord path)"
+    (store/start-drainer!)
+    (instrument/instrument-ns! 'crinklywrappr.weathertop-test test-opts)
+    (test-caller (->InlineTestPrice) 99)
     (Thread/sleep 200)
     (let [state (store/get-state)
-          deep  (filter #(= 2 (count %)) (keys state))]
-      (is (seq deep) "Should have at least one depth-2 path"))
+          paths (keys state)]
+      (is (some #(= "InlineTestPrice" (:record-type (last %))) paths)
+          "InlineTestPrice variant frame should appear in recorded paths"))
+    (instrument/uninstrument-all!)
+    (store/stop-drainer!)))
+
+(deftest test-extend-type-recorded
+  (testing "extend-type protocol fn records caller and variant"
+    (store/start-drainer!)
+    (instrument/instrument-ns! 'crinklywrappr.weathertop-test test-opts)
+    (test-caller (->ExtendTestPrice) 50)
+    (Thread/sleep 200)
+    (let [state (store/get-state)
+          paths (keys state)]
+      (is (some #(= "ExtendTestPrice" (:record-type (last %))) paths)
+          "ExtendTestPrice variant frame should appear in recorded paths"))
+    (instrument/uninstrument-all!)
+    (store/stop-drainer!)))
+
+(deftest test-multimethod-recorded
+  (testing "defmethod body records caller + generic + dispatch-val variant"
+    (store/start-drainer!)
+    (instrument/instrument-ns! 'crinklywrappr.weathertop-test test-opts)
+    (multi-caller :flat 100)
+    (Thread/sleep 200)
+    (let [state (store/get-state)
+          paths (keys state)]
+      (is (some #(= :flat (:dispatch-val (last %))) paths)
+          ":flat dispatch-val variant should appear in recorded paths"))
+    (instrument/uninstrument-all!)
+    (store/stop-drainer!)))
+
+(deftest test-constructor-recorded
+  (testing "->RecordName constructor fn call is recorded"
+    (store/start-drainer!)
+    (instrument/instrument-ns! 'crinklywrappr.weathertop-test test-opts)
+    (->InlineTestPrice)
+    (Thread/sleep 200)
+    (let [state (store/get-state)
+          paths (keys state)]
+      (is (some #(= "crinklywrappr.weathertop-test/->InlineTestPrice"
+                    (:fn (last %)))
+                paths)
+          "->InlineTestPrice constructor should be recorded"))
     (instrument/uninstrument-all!)
     (store/stop-drainer!)))
