@@ -276,17 +276,28 @@
       nodeSel.exit().remove();
     }
 
-    // SSE
-    const es = new EventSource('/events');
-    es.onopen    = () => { statusEl.textContent = 'live'; statusEl.style.color = '#4ade80'; };
-    es.onerror   = () => { statusEl.textContent = 'disconnected'; statusEl.style.color = '#f87171'; };
-    es.onmessage = (e) => { render(JSON.parse(e.data)); };
+    // SSE with auto-reconnect
+    function connect() {
+      const es = new EventSource('/events');
+      es.onopen = () => {
+        statusEl.textContent = 'live';
+        statusEl.style.color = '#4ade80';
+      };
+      es.onerror = () => {
+        statusEl.textContent = 'reconnecting\u2026';
+        statusEl.style.color = '#facc15';
+        es.close();
+        setTimeout(connect, 3000);
+      };
+      es.onmessage = (e) => { render(JSON.parse(e.data)); };
+    }
 
-    // Initial fetch
+    // Initial fetch, then open SSE
     fetch('/data')
       .then(r => r.json())
       .then(render)
-      .catch(() => {});
+      .catch(() => {})
+      .finally(connect);
   </script>
 </body>
 </html>
